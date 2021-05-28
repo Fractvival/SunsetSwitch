@@ -2,6 +2,8 @@
 
 Ovládání relé (např. světel) pomocí Wemos Mini na základě získáného času z NTP a následného výpočtu soumraku dle geolokace
 
+!Aktuálně řešeno jen do půlnoci...
+
 
 Nejdříve proběhne připojení k WiFi
 
