@@ -186,10 +186,8 @@ void setup()
   sunTime.setCurrentDate(currentYear, currentMonth, currentDay);
   sunriseCivilTime = (time_t)sunTime.calcCivilSunrise();
   sunsetCivilTime = (time_t)sunTime.calcCivilSunset();
-
   lightOn = false;
   startSecond = (minute(sunsetCivilTime)*3600)+(second(sunsetCivilTime)*60);
-
   #ifdef __SUNSET_DEBUG
     Serial.print("LATITUDE: ");
     Serial.println(LATITUDE);
@@ -226,9 +224,7 @@ void setup()
 
 void loop() 
 {
-  Serial.print("\nSignal ");
-  Serial.print(WiFi.RSSI());
-  Serial.print(" dBm * Time  ");
+  Serial.print("Time  ");
   Serial.println(timeClient.getFormattedTime());
   actSecond = (timeClient.getHours()*3600)+(timeClient.getMinutes()*60);
   Serial.print("startSecond: ");
