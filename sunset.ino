@@ -257,7 +257,7 @@ void loop()
   Serial.print("NewDate: ");
   Serial.println(newDate);
 
-  if ( (millis()/1000) > 10800 )
+  if ( (millis()/1000) > 4200 )
   {
     if ( newDate == false )
     {
