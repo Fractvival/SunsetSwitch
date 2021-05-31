@@ -28,6 +28,7 @@ SunSet sunTime;
 time_t sunriseCivilTime;
 time_t sunsetCivilTime;
 bool lightOn = false;
+bool newDate = false;
 unsigned long epochTime = 0;
 struct tm *ptm;
 int currentDay = 0;
@@ -250,8 +251,48 @@ void loop()
     }
   }
   Serial.print("LightOn: ");
-  Serial.println(lightOn);
-  Serial.print("ArduinoSecond: ");
+  Serial.print(lightOn);
+  Serial.print(" * ArduinoSecond: ");
   Serial.println(millis()/1000);
+  Serial.print("NewDate: ");
+  Serial.println(newDate);
+
+  if ( (millis()/1000) > 10800 )
+  {
+    if ( newDate == false )
+    {
+      if ( timeClient.update() )
+      {
+        epochTime = timeClient.getEpochTime();
+        ptm = gmtime ((time_t *)&epochTime); 
+        currentDay = ptm->tm_mday;
+        currentMonth = ptm->tm_mon+1;
+        currentYear = ptm->tm_year+1900;
+        sunTime.setCurrentDate(currentYear, currentMonth, currentDay);
+        sunriseCivilTime = (time_t)sunTime.calcCivilSunrise();
+        sunsetCivilTime = (time_t)sunTime.calcCivilSunset();
+        startSecond = (minute(sunsetCivilTime)*3600)+(second(sunsetCivilTime)*60);
+        newDate = true;
+      }
+      else
+      {
+        while ( !testForConnect() )
+        {
+          #ifdef __SUNSET_DEBUG
+            Serial.println("..A MOMENT FOR NEW ATTEMPTS!\n");
+          #endif
+          delay(WAITTIME*WTRETRY);
+        }
+        while ( !testForNTP() )
+        {
+          #ifdef __SUNSET_DEBUG
+            Serial.println("..A MOMENT FOR NEW ATTEMPTS!\n");
+          #endif
+          delay(WAITTIME*WTRETRY);
+        }
+      }
+    }
+  }
+  
   delay(1000);
 }
