@@ -4,150 +4,258 @@
 #include <TimeLib.h>
 #include <sunset.h>
 
+#define __SUNSET_DEBUG
+
 #define TIMEZONE  +1
 #define LATITUDE  48.9473
 #define LONGITUDE 16.2590
+#define WTRETRY   20
+#define WAITTIME  500
+#define NTPSERVER "cz.pool.ntp.org"
+#define RELAYPIN  D3
 
-const char *ssid     = "Cisco";
-const char *password = "Hotentot1919";
+struct WD
+{
+  String SSID;
+  String Password;
+};
+
+WD WifiData[3] = {{"MAJI","14042015"},{"DomaNET","domanet397117"},{"DomaN3T","domanet397117"}};
 
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "cz.pool.ntp.org", 3600, 60000);
-SunSet sun;
-
+NTPClient timeClient(ntpUDP, NTPSERVER, 3600, 60000);
+SunSet sunTime;
+time_t sunriseCivilTime;
+time_t sunsetCivilTime;
+bool lightOn = false;
 unsigned long epochTime = 0;
 struct tm *ptm;
-int monthDay = 0;
+int currentDay = 0;
 int currentMonth = 0;
 int currentYear = 0;
-time_t v = 0;
-time_t z = 0;
-bool isLightOn = false;
-String ntpTime = "";
-String startTime = ""; 
-String testStopTime = "";
-String SunriseSunset = "";
+bool summerTime = false;
+unsigned long startSecond = 0;
+unsigned long actSecond = 0;
+
+bool testForConnect()
+{
+  int waitDelta = 0;
+  if ( WiFi.status() == WL_CONNECTED )
+  {
+    #ifdef __SUNSET_DEBUG
+      Serial.print("WIFI IS STILL CONNECTED-> DISCONNECTING...");
+    #endif
+    WiFi.disconnect();
+    while( WiFi.status() == WL_CONNECTED )
+    {
+      #ifdef __SUNSET_DEBUG
+        Serial.print(".");
+      #endif
+      delay(WAITTIME);
+      waitDelta++;
+      if ( waitDelta > WTRETRY )
+        break;
+    }
+    #ifdef __SUNSET_DEBUG
+      Serial.println("OK!");
+    #endif
+  }
+  #ifdef __SUNSET_DEBUG
+    Serial.println("STARTING CONNECT TO WIFI FROM WIFILIST");
+  #endif
+  for ( int index = 0; index < 3; index++ )
+  {
+    #ifdef __SUNSET_DEBUG
+      Serial.print("CONNECT TO SSID: ");
+      Serial.println(WifiData[index].SSID);
+      Serial.print("PASSWORD: ");
+      Serial.println(WifiData[index].Password);
+    #endif
+    waitDelta = 0;
+    WiFi.begin(WifiData[index].SSID,WifiData[index].Password);
+    while ( WiFi.status() != WL_CONNECTED )
+    {
+      #ifdef __SUNSET_DEBUG
+        Serial.print(".");
+      #endif
+      delay(WAITTIME);
+      waitDelta++;
+      if ( waitDelta > WTRETRY )
+      {
+        #ifdef __SUNSET_DEBUG
+          Serial.println("TIMEOUT!");
+        #endif
+        break;
+      }
+    }
+  }
+  if ( WiFi.status() != WL_CONNECTED )
+  {
+    #ifdef __SUNSET_DEBUG
+      Serial.println("\nTOTAL TIMEOUT! WIFI NOT CONNECTED!\n");
+    #endif
+    return false;
+  }
+  #ifdef __SUNSET_DEBUG
+    Serial.println("\nSUCCESS! WIFI IS CONNECTED\n");
+  #endif
+  return true;
+}
+
+bool testForNTP()
+{
+  int waitDelta = 0;
+  #ifdef __SUNSET_DEBUG
+    Serial.print("UPDATE TIME FROM NTP ");
+    Serial.print(NTPSERVER);
+    Serial.print("...");
+  #endif
+
+  timeClient.begin();
+  
+  while( !timeClient.update() )
+  {
+    #ifdef __SUNSET_DEBUG
+      Serial.print(".");
+    #endif
+    delay(WAITTIME);
+    waitDelta++;
+    if ( waitDelta > WTRETRY )
+    {
+      #ifdef __SUNSET_DEBUG
+        Serial.println("TIMEOUT!");
+      #endif
+      break;
+    }
+  }
+
+  if ( !timeClient.isTimeSet() )
+  {
+    #ifdef __SUNSET_DEBUG
+      Serial.println("NTP UPDATE FAILED!");
+    #endif
+    timeClient.end();
+    return false;
+  }
+
+  #ifdef __SUNSET_DEBUG
+    Serial.println("SUCCESS!");
+  #endif
+  return true;
+}
+
 
 void setup()
 {
   Serial.begin(115200);
-  pinMode(D3, OUTPUT);
-  delay(100);
-  digitalWrite(D3, LOW);
-  delay(100);
-  Serial.println("\nSunSet v1.0 starting...");
-  Serial.print("Connect to WiFi: ");
-  WiFi.begin(ssid, password);
-  while ( WiFi.status() != WL_CONNECTED ) {
-    delay ( 500 );
-    Serial.print ( "." );
+  delay(50);
+  pinMode(RELAYPIN, OUTPUT);
+  delay(50);
+  digitalWrite(RELAYPIN, LOW);
+  delay(50);
+    #ifdef __SUNSET_DEBUG
+      Serial.println("\nSUNSET SWITCH V2 STARTING...\n");
+    #endif
+  while ( !testForConnect() )
+  {
+    #ifdef __SUNSET_DEBUG
+      Serial.println("..A MOMENT FOR NEW ATTEMPTS!\n");
+    #endif
+    delay(WAITTIME*WTRETRY);
   }
-  Serial.println("OK!\n");
-  sun.setPosition(LATITUDE, LONGITUDE, TIMEZONE);
-  timeClient.begin();
+  while ( !testForNTP() )
+  {
+    #ifdef __SUNSET_DEBUG
+      Serial.println("..A MOMENT FOR NEW ATTEMPTS!\n");
+    #endif
+    delay(WAITTIME*WTRETRY);
+  }
+  epochTime = timeClient.getEpochTime();
+  ptm = gmtime ((time_t *)&epochTime); 
+  currentDay = ptm->tm_mday;
+  currentMonth = ptm->tm_mon+1;
+  currentYear = ptm->tm_year+1900;
+  // vypocet relativniho letniho casu
+  if ( (currentMonth > 3) && (currentMonth < 11) )
+  {
+    timeClient.setTimeOffset(7200);
+    sunTime.setTZOffset(2);
+    summerTime = true;
+  }
+  sunTime.setPosition(LATITUDE, LONGITUDE, TIMEZONE);
+  sunTime.setCurrentDate(currentYear, currentMonth, currentDay);
+  sunriseCivilTime = (time_t)sunTime.calcCivilSunrise();
+  sunsetCivilTime = (time_t)sunTime.calcCivilSunset();
+
+  lightOn = false;
+  startSecond = (minute(sunsetCivilTime)*3600)+(second(sunsetCivilTime)*60);
+
+  #ifdef __SUNSET_DEBUG
+    Serial.print("LATITUDE: ");
+    Serial.println(LATITUDE);
+    Serial.print("LONGITUDE: ");
+    Serial.println(LONGITUDE);
+    Serial.print("TIMEZONE: ");
+    Serial.println(TIMEZONE);
+    Serial.print("CURRENT TIME (h:m:s)- ");
+    Serial.println(timeClient.getFormattedTime());
+    Serial.print("SUNSET CIVIL TIME (h:m) - ");
+    Serial.print(minute(sunsetCivilTime));
+    Serial.print(":");
+    Serial.println(second(sunsetCivilTime));
+    Serial.print("SUNRISE CIVIL TIME (h:m) - ");
+    Serial.print(minute(sunriseCivilTime));
+    Serial.print(":");
+    Serial.println(second(sunriseCivilTime));
+    Serial.print("CURRENT DATE (d/m/y): ");
+    Serial.print(currentDay);
+    Serial.print("/");
+    Serial.print(currentMonth);
+    Serial.print("/");
+    Serial.println(currentYear);
+    Serial.print("SUMMERTIME BOOLEAN: ");
+    Serial.println(summerTime);
+    Serial.print("LIGHTON BOOLEAN: ");
+    Serial.println(lightOn);
+  #endif
+  delay(WAITTIME*WTRETRY);
 }
+
+
+
 
 void loop() 
 {
-  if ( WiFi.status() != WL_CONNECTED ) 
+  Serial.print("\nSignal ");
+  Serial.print(WiFi.RSSI());
+  Serial.print(" dBm * Time  ");
+  Serial.println(timeClient.getFormattedTime());
+  actSecond = (timeClient.getHours()*3600)+(timeClient.getMinutes()*60);
+  Serial.print("startSecond: ");
+  Serial.print(startSecond);
+  Serial.print(" * ActSecond: ");
+  Serial.println(actSecond);
+  if ( lightOn == false )
   {
-    timeClient.end();
-    //WiFi.disconnect();
-    WiFi.begin(ssid, password);
-    while ( WiFi.status() != WL_CONNECTED ) {
-      delay ( 500 );
-      Serial.print ( "." );
+    if ( actSecond >= startSecond )
+    {
+      digitalWrite(RELAYPIN, HIGH);
+      lightOn = true;      
     }
-    timeClient.begin();
   }
   else
   {
-    Serial.print("\nSignal: ");
-    Serial.print(WiFi.RSSI());
-    Serial.println(" dBm (-50 db = 100% quality | -100 db = 0% quality)");
-    Serial.print("Update NTP time - ");
-    timeClient.update();
-  
-    epochTime = timeClient.getEpochTime();
-    ptm = gmtime ((time_t *)&epochTime); 
-    monthDay = ptm->tm_mday;
-    currentMonth = ptm->tm_mon+1;
-    currentYear = ptm->tm_year+1900;
-  
-    if ( (currentMonth > 3) && (currentMonth < 11) )
+    if ( actSecond < startSecond )
     {
-      timeClient.setTimeOffset(7200);
-      sun.setTZOffset(2);
+      // OFF LIGHT
+      digitalWrite(RELAYPIN, LOW);
+      delay(WAITTIME*WTRETRY);
+      ESP.reset();
     }
-  
-    sun.setCurrentDate(currentYear, currentMonth, monthDay);
-    Serial.println(timeClient.getFormattedTime());
-  
-    v = (time_t)sun.calcCivilSunrise();
-    z = (time_t)sun.calcCivilSunset();
-
-    SunriseSunset = "Civil Sunrise - ";
-    SunriseSunset += String(minute(v)) + ":" + String(second(v)) + "  || Civil Sunset - " + String(minute(z)) + ":" + String(second(z));
-    
-    Serial.println(SunriseSunset);
-
-    ntpTime = "";
-    startTime = ""; 
-
-    if (timeClient.getHours() < 10 )
-    {
-      ntpTime += "0";
-    }
-    ntpTime += timeClient.getHours();
-    if (timeClient.getMinutes() < 10 )
-    {
-      ntpTime += "0";
-    }
-    ntpTime += timeClient.getMinutes();
-
-    if (minute(z) < 10 )
-    {
-      startTime += "0";
-    }
-    startTime += minute(z);
-    if (second(z) < 10 )
-    {
-      startTime += "0";
-    }
-    startTime += second(z);
-
-    if ( isLightOn == false )
-    {
-      if ( ntpTime.toInt() >= startTime.toInt() )
-      {
-        isLightOn = true;
-        Serial.println("LightOn = TRUE");
-      }
-    }
-
-    if ( isLightOn )
-    {
-      if ( ntpTime.toInt() < startTime.toInt() )
-      {
-        isLightOn = false;
-        Serial.println("LightOn = FALSE");
-      }
-    }
-
-    if ( isLightOn )
-    {
-      delay(100);
-      digitalWrite(D3, HIGH);
-      delay(100);
-    }
-    else
-    {
-      delay(100);
-      digitalWrite(D3, LOW);
-      delay(100);
-    }
-  
-    delay(1000);
   }
-
+  Serial.print("LightOn: ");
+  Serial.println(lightOn);
+  Serial.print("ArduinoSecond: ");
+  Serial.println(millis()/1000);
+  delay(1000);
 }
